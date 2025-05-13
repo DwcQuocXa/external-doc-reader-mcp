@@ -1,0 +1,81 @@
+# PRD: External Documentation URL Relevance Engine MCP Server
+
+**1. Introduction**
+
+*   **Problem:** When faced with a large documentation website, AI agents (and users) often struggle to quickly identify the *specific pages* most relevant to a particular query. Manually browsing or broad searches can be inefficient.
+*   **Goal:** To develop an MCP (Model Context Protocol) server that, given a root documentation URL and a user query, intelligently discovers pages within that site and then uses an LLM to filter and return a list of the most relevant page URLs.
+*   **Vision:** To provide a focused tool that acts as a "documentation guide," pinpointing the most promising page URLs within a larger website that an AI agent (or a subsequent tool) can then use for targeted content extraction and Q&A. This simplifies the initial step of finding relevant information. Reference for crawling/mapping: [`mendableai/firecrawl-mcp-server`](https://github.com/mendableai/firecrawl-mcp-server).
+
+**2. Objectives**
+
+*   **O1:** Enable users/agents to quickly find a list of the most relevant page URLs within a given documentation website based on a natural language query.
+*   **O2:** Implement an efficient workflow: 1. Discover page URLs and basic metadata (like titles) from a starting URL. 2. Use an LLM to filter this list of URLs against the user's query.
+*   **O3:** Provide a concise list of URLs that are highly relevant to the user's query, suitable for further processing.
+*   **O4:** Maintain a simple and maintainable codebase for this specific URL filtering task.
+*   **O5:** Ensure cost-effectiveness by using LLM for filtering metadata rather than full content processing, and by caching discovered URL lists.
+
+**3. Scope**
+
+*   **In Scope (Version 1.0):**
+    *   A single MCP tool (e.g., `find_relevant_doc_pages`) exposed via `StdioServerTransport` accepting a `root_url` (string, for starting the crawl/map) and `query` (string).
+    *   A web crawling/mapping mechanism (using Firecrawl, e.g., `mapUrl` or `crawlUrl` with options focused on discovering URLs and page titles/metadata, not necessarily full content immediately).
+    *   Basic file-system caching of *discovered URL lists and their associated metadata (titles, brief descriptions if available)*, keyed by the normalized `root_url`.
+    *   Integration with Google Gemini via the LangChain JS/TS library.
+    *   An LLM-powered filtering step: The user's `query` and the list of discovered URLs (with titles/metadata) are sent to the LLM to identify the most relevant URLs.
+    *   Returning the filtered list of relevant URLs via the MCP interface.
+    *   Basic logging infrastructure.
+*   **Out of Scope (Version 1.0):**
+    *   *Full content scraping of all discovered pages as the primary output of this tool.* The tool provides URLs; another tool/agent would fetch content from those specific URLs.
+    *   *Directly answering the user's query.* This tool finds relevant *pages*.
+    *   Context-Augmented Generation (CAG) or RAG for Q&A *within this tool*.
+    *   Advanced scraping for JS-heavy sites or complex auth (beyond what Firecrawl's mapping/basic crawl offers).
+    *   LLM Context Caching (as we are not primarily sending large contexts, but lists of URLs/titles).
+    *   Direct handling of non-HTML formats for URL discovery (e.g., sitemap.xml is fine if Firecrawl uses it, but not direct PDF parsing for links).
+
+**4. Functional Requirements**
+
+*   **FR1: URL Discovery & Metadata Collection**
+    *   **User Story:** As an AI agent, I provide a documentation root URL and a query to the `find_relevant_doc_pages` tool so it can identify potentially relevant pages within that site.
+    *   **System Req:** The MCP server MUST expose a tool (e.g., `find_relevant_doc_pages`) accepting `root_url` and `query`.
+    *   **System Req:** On receiving a request, the server MUST check its cache for a previously discovered list of page URLs and metadata associated with the normalized `root_url`.
+    *   **System Req:** If not cached or stale, the server MUST use Firecrawl (e.g., `mapUrl` or `crawlUrl` configured for structure/metadata discovery) to find accessible page URLs under the `root_url`, along with their titles or other simple metadata if readily available.
+    *   **System Req:** The discovered list of URLs and their metadata MUST be stored in the local cache keyed by the normalized `root_url`.
+*   **FR2: LLM-Powered URL Filtering**
+    *   **User Story:** As an AI agent, I rely on the tool to use its LLM capabilities to sift through many discovered page URLs and return only those most likely to contain information relevant to my `query`.
+    *   **System Req:** The server MUST retrieve the (cached or newly discovered) list of page URLs and their metadata.
+    *   **System Req:** The server MUST construct a prompt for the Gemini LLM containing this list (e.g., "URL: [url1], Title: [title1]\\nURL: [url2], Title: [title2]...") and the user's `query`.
+    *   **System Req:** The prompt MUST instruct the LLM to analyze the list and return only the URLs that are most relevant to the `query`.
+*   **FR3: Relevant URL List Delivery**
+    *   **System Req:** The server MUST receive the filtered list of URLs from the Gemini API (via LangChain).
+    *   **System Req:** The server MUST format and return this list of relevant URLs (or an appropriate error/empty list message) to the client.
+
+**5. Non-Functional Requirements**
+
+*   **NFR1: Performance:** URL discovery time is variable. LLM filtering of URLs should be quick. Target for overall tool response: < 20 seconds for moderately sized sites.
+*   **NFR2: Cost:** LLM usage is for filtering a list of URLs/titles, not full content, minimizing costs.
+*   **NFR3: Simplicity:** Codebase in Node.js/TypeScript should be maintainable.
+*   **NFR4: Reliability:** Basic error handling for invalid URLs, network/discovery errors, LLM API errors.
+*   **NFR5: Usability (Integration):** Clearly defined MCP tool interface.
+
+**6. Technical Considerations**
+
+*   **Primary LLM:** Google Gemini (e.g., Gemini Pro).
+*   **LLM SDK:** LangChain JS/TS library.
+*   **Server Framework:** `@modelcontextprotocol/sdk` (Node.js) with `StdioServerTransport`.
+*   **Language:** Node.js / TypeScript.
+*   **URL Discovery Technology:** Firecrawl (`mapUrl` for sitemap-like structures, or `crawlUrl` with `mode: 'crawl'` to get links without full scrape, or focused on metadata).
+*   **Caching:** Local file system for *lists of discovered URLs and their metadata*.
+*   **Logging:** Node.js library (e.g., `pino`).
+
+**7. Success Metrics**
+
+*   **SM1: URL List Relevance:** >90% of URLs in the returned list are directly relevant to the user's query within the context of the `root_url`.
+*   **SM2: Performance:** Median tool response time < 20s.
+*   **SM3: Cost Efficiency:** LLM cost per query remains low due to focusing on metadata.
+*   **SM4: Cache Hit Rate (for URL lists):** >70% for repeated `root_url` requests.
+
+**8. Future Considerations (Post-V1)**
+
+*   Allowing user to specify crawl depth or patterns for URL discovery.
+*   Fetching brief snippets or summaries for each discovered URL to improve LLM filtering accuracy.
+*   Ranking of returned relevant URLs by perceived relevance. 
